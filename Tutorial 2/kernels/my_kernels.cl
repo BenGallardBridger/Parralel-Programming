@@ -1,9 +1,21 @@
 //converts values into histogram
-kernel void histogramVals(global const uchar* A, global const int* binSize, global const int* maximum, global uint* B) {
-	int id = get_global_id(0);
-	int bin_num = (A[id]/(float)maximum[0])*binSize[0]-1;
+//kernel void histogramVals(global const uchar* A, global const int* binSize, global const int* maximum, global uint* B) {
+//	int id = get_global_id(0);
+//	int bin_num = (A[id]/(float)maximum[0])*binSize[0]-1;
+//
+//	atomic_inc(&B[bin_num]);
+//}
 
-	atomic_inc(&B[bin_num]);
+//histogrammer
+kernel void histogramVals(global const uchar* A, global const int* binSize, global const int* maximum, global uint* B, local uint* localH) {
+	int id = get_global_id(0);
+	int bin_num = (A[id] / (float)maximum[0]) * binSize[0];
+	barrier(CLK_GLOBAL_MEM_FENCE);
+	atomic_inc(&localH[bin_num]);
+	barrier(CLK_LOCAL_MEM_FENCE);
+	if (id < binSize) {
+		atomic_add(&B[id],localH[id]);
+	}
 }
 
 //Hillis-Steele basic inclusive scan
@@ -23,6 +35,8 @@ kernel void scan_hs(global uint* A, global uint* B) {
 		C = A; A = B; B = C; //swap A & B between steps
 	}
 }
+
+
 
 kernel void cumHistogramVals(global const uint* A, global uint* B) {
 	int id = get_global_id(0);

@@ -19,7 +19,7 @@ void print_help() {
 
 int main(int argc, char** argv) {
 	//Part 1 - handle command line options such as device selection, verbosity, etc.
-	int platform_id = 0;
+	int platform_id = 1;
 	int device_id = 0;
 	string image_filename = "test.pgm";
 	int bin_size = 128;
@@ -49,7 +49,7 @@ int main(int argc, char** argv) {
 		std::cout << "Running on " << GetPlatformName(platform_id) << ", " << GetDeviceName(platform_id, device_id) << std::endl;
 		
 		//create a queue to which we will push commands for the device
-		cl::CommandQueue queue(context);
+		cl::CommandQueue queue(context, CL_QUEUE_PROFILING_ENABLE);
 
 		//3.2 Load & build the device code
 		cl::Program::Sources sources;
@@ -77,14 +77,14 @@ int main(int argc, char** argv) {
 		//host - output
 		std::vector<unsigned int> C(vector_elements);
 
+		cl::Event profEvent;
+
 		cl::Buffer buffer_C(context, CL_MEM_READ_WRITE, vector_size);
 
 		//host - output
 		std::vector<unsigned int> D(vector_elements);
 
 		cl::Buffer buffer_D(context, CL_MEM_READ_WRITE, vector_size);
-
-		size_t vector_size1 = bin_size * sizeof(unsigned short);//size in bytes
 
 		std::vector<unsigned int> E(vector_elements);
 
@@ -96,9 +96,9 @@ int main(int argc, char** argv) {
 		cl::Buffer numOfBins(context, CL_MEM_READ_ONLY, sizeof(int));
 		cl::Buffer maximumValue(context, CL_MEM_READ_ONLY, sizeof(int));
 		//4.1 Copy images to device memory
-		queue.enqueueWriteBuffer(dev_image_input, CL_TRUE, 0, image_input.size(), &image_input.data()[0]);
-		queue.enqueueWriteBuffer(numOfBins, CL_TRUE, 0, sizeof(int), &bin_size);
-		queue.enqueueWriteBuffer(maximumValue, CL_TRUE, 0, sizeof(int), &max);
+		queue.enqueueWriteBuffer(dev_image_input, CL_TRUE, 0, image_input.size(), &image_input.data()[0], NULL, &profEvent);
+		queue.enqueueWriteBuffer(numOfBins, CL_TRUE, 0, sizeof(int), &bin_size, NULL, &profEvent);
+		queue.enqueueWriteBuffer(maximumValue, CL_TRUE, 0, sizeof(int), &max, NULL, &profEvent);
 
 
 		//4.2 Setup and execute the kernel (i.e. device code)
@@ -107,6 +107,7 @@ int main(int argc, char** argv) {
 		kernel.setArg(1, numOfBins);
 		kernel.setArg(2, maximumValue);
 		kernel.setArg(3, buffer_C);
+		kernel.setArg(4, cl::Local(vector_size));
 		
 		cl::Kernel kernelB = cl::Kernel(program, "scan_hs");
 		kernelB.setArg(0, buffer_C);
@@ -124,24 +125,29 @@ int main(int argc, char** argv) {
 		kernelD.setArg(3, numOfBins);
 		kernelD.setArg(4, dev_image_output);
 
-		queue.enqueueNDRangeKernel(kernel, cl::NullRange, cl::NDRange(image_input.size()), cl::NullRange);
+		queue.enqueueNDRangeKernel(kernel, cl::NullRange, cl::NDRange(image_input.size()), cl::NullRange, NULL, &profEvent);
 		queue.enqueueReadBuffer(buffer_C, CL_TRUE, 0, vector_size, &C[0]);
 		cerr << "C = " << C;
-		queue.enqueueNDRangeKernel(kernelB, cl::NullRange, cl::NDRange(vector_elements), cl::NullRange);
-		queue.enqueueNDRangeKernel(kernelC, cl::NullRange, cl::NDRange(vector_elements), cl::NullRange);
+		queue.enqueueNDRangeKernel(kernelB, cl::NullRange, cl::NDRange(vector_elements), cl::NullRange, NULL, &profEvent);
+		queue.enqueueNDRangeKernel(kernelC, cl::NullRange, cl::NDRange(vector_elements), cl::NullRange, NULL, &profEvent);
 		queue.enqueueReadBuffer(buffer_D, CL_TRUE, 0, vector_size, &D[0]);
 		cerr << "\nD = " << D;
-		queue.enqueueNDRangeKernel(kernelD, cl::NullRange, cl::NDRange(image_input.size()), cl::NullRange);
+		queue.enqueueNDRangeKernel(kernelD, cl::NullRange, cl::NDRange(image_input.size()), cl::NullRange, NULL, &profEvent);
 		queue.enqueueReadBuffer(buffer_E, CL_TRUE, 0, vector_size, &E[0]);
 		cerr << "\nE = " << E;
 		
 		vector<unsigned char> output_buffer(image_input.size());
 		//4.3 Copy the result from device to host
-		queue.enqueueReadBuffer(dev_image_output, CL_TRUE, 0, output_buffer.size(), &output_buffer.data()[0]);
+		queue.enqueueReadBuffer(dev_image_output, CL_TRUE, 0, output_buffer.size(), &output_buffer.data()[0], NULL, &profEvent);
 
 		CImg<unsigned char> output_image(output_buffer.data(), image_input.width(), image_input.height(), image_input.depth(), image_input.spectrum());
 		CImgDisplay disp_output(output_image, "output");
 		
+		std::cout << "\nKernel execution time [ns]:" <<
+			profEvent.getProfilingInfo<CL_PROFILING_COMMAND_END>() -
+			profEvent.getProfilingInfo<CL_PROFILING_COMMAND_START>() << std::endl;
+		std::cout << GetFullProfilingInfo(profEvent, ProfilingResolution::PROF_US)
+			<< std::endl;
 
 		while (!disp_input.is_closed() && !disp_output.is_closed()
 			&& !disp_input.is_keyESC() && !disp_output.is_keyESC()) {
