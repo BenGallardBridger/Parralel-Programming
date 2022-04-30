@@ -22,7 +22,7 @@ int main(int argc, char** argv) {
 	int platform_id = 1;
 	int device_id = 0;
 	string image_filename = "test.pgm";
-	int bin_size = 128;
+	int bin_size = 15;
 	for (int i = 1; i < argc; i++) {
 		if ((strcmp(argv[i], "-p") == 0) && (i < (argc - 1))) { platform_id = atoi(argv[++i]); }
 		else if ((strcmp(argv[i], "-d") == 0) && (i < (argc - 1))) { device_id = atoi(argv[++i]); }
@@ -86,9 +86,9 @@ int main(int argc, char** argv) {
 
 		cl::Buffer buffer_D(context, CL_MEM_READ_WRITE, vector_size);
 
-		std::vector<unsigned int> E(vector_elements);
-
-		cl::Buffer buffer_E(context, CL_MEM_READ_WRITE, vector_size);
+		std::vector<unsigned char> E(vector_elements);
+		size_t vectorCharSize = sizeof(unsigned char) * bin_size;
+		cl::Buffer buffer_E(context, CL_MEM_READ_WRITE, vectorCharSize);
 
 		//device - buffers
 		cl::Buffer dev_image_input(context, CL_MEM_READ_ONLY, image_input.size());
@@ -109,12 +109,12 @@ int main(int argc, char** argv) {
 		kernel.setArg(3, buffer_C);
 		kernel.setArg(4, cl::Local(vector_size));
 		
-		cl::Kernel kernelB = cl::Kernel(program, "scan_hs");
+		cl::Kernel kernelB = cl::Kernel(program, "scan_bl");
 		kernelB.setArg(0, buffer_C);
 		kernelB.setArg(1, buffer_D);
 
 		cl::Kernel kernelC = cl::Kernel(program, "normHistogramVals");
-		kernelC.setArg(0, buffer_D);
+		kernelC.setArg(0, buffer_C);
 		kernelC.setArg(1, maximumValue);
 		kernelC.setArg(2, buffer_E);
 
@@ -127,14 +127,16 @@ int main(int argc, char** argv) {
 
 		queue.enqueueNDRangeKernel(kernel, cl::NullRange, cl::NDRange(image_input.size()), cl::NullRange, NULL, &profEvent);
 		queue.enqueueReadBuffer(buffer_C, CL_TRUE, 0, vector_size, &C[0]);
-		cerr << "C = " << C;
+		cerr << "Histogram = " << C << std::endl;
 		queue.enqueueNDRangeKernel(kernelB, cl::NullRange, cl::NDRange(vector_elements), cl::NullRange, NULL, &profEvent);
-		queue.enqueueNDRangeKernel(kernelC, cl::NullRange, cl::NDRange(vector_elements), cl::NullRange, NULL, &profEvent);
+		queue.enqueueReadBuffer(buffer_C, CL_TRUE, 0, vector_size, &C[0]);
+		cerr << "Histogram = " << C << std::endl;
 		queue.enqueueReadBuffer(buffer_D, CL_TRUE, 0, vector_size, &D[0]);
-		cerr << "\nD = " << D;
+		cerr << "Cumulative = " << D << std::endl;
+		queue.enqueueNDRangeKernel(kernelC, cl::NullRange, cl::NDRange(vector_elements), cl::NullRange, NULL, &profEvent);
+		queue.enqueueReadBuffer(buffer_E, CL_TRUE, 0, vectorCharSize, &E[0]);
+		cerr << "Normalized = " << E << std::endl;
 		queue.enqueueNDRangeKernel(kernelD, cl::NullRange, cl::NDRange(image_input.size()), cl::NullRange, NULL, &profEvent);
-		queue.enqueueReadBuffer(buffer_E, CL_TRUE, 0, vector_size, &E[0]);
-		cerr << "\nE = " << E;
 		
 		vector<unsigned char> output_buffer(image_input.size());
 		//4.3 Copy the result from device to host
