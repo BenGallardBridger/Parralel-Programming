@@ -22,7 +22,7 @@ int main(int argc, char** argv) {
 	int platform_id = 1;
 	int device_id = 0;
 	string image_filename = "test.pgm";
-	int bin_size = 15;
+	int bin_size = 60;
 	for (int i = 1; i < argc; i++) {
 		if ((strcmp(argv[i], "-p") == 0) && (i < (argc - 1))) { platform_id = atoi(argv[++i]); }
 		else if ((strcmp(argv[i], "-d") == 0) && (i < (argc - 1))) { device_id = atoi(argv[++i]); }
@@ -36,9 +36,10 @@ int main(int argc, char** argv) {
 
 	//detect any potential exceptions
 	try {
+		//Load the Image
 		CImg<unsigned char> image_input;
 		image_input.load(image_filename.c_str());
-
+		//Display the image
 		CImgDisplay disp_input(image_input, "input");
 
 		//Part 3 - host operations
@@ -72,85 +73,87 @@ int main(int argc, char** argv) {
 		//Part 4 - device operations
 		size_t vector_elements = bin_size;//number of elements
 		size_t vector_size = bin_size * sizeof(unsigned int);//size in bytes
-		int max = image_input.max();
-		std::cout << max << std::endl;
-		//host - output
-		std::vector<unsigned int> C(vector_elements);
-
+		size_t vector_size_char = bin_size * sizeof(unsigned char);
+		//Get the maximum value of a pixel from the image
+		int maximumPixelIntensity = image_input.max();
+		//Event to track time for all operations to take place
 		cl::Event profEvent;
 
-		cl::Buffer buffer_C(context, CL_MEM_READ_WRITE, vector_size);
-
-		//host - output
-		std::vector<unsigned int> D(vector_elements);
-
-		cl::Buffer buffer_D(context, CL_MEM_READ_WRITE, vector_size);
-
-		std::vector<unsigned char> E(vector_elements);
-		size_t vectorCharSize = sizeof(unsigned char) * bin_size;
-		cl::Buffer buffer_E(context, CL_MEM_READ_WRITE, vectorCharSize);
+		//Vectors to contain values from the output of the buffers
+		std::vector<unsigned int> frequency_histogram(vector_elements);
+		std::vector<unsigned int> cumulative_histogram(vector_elements);
+		std::vector<unsigned char> normalized_histogram(vector_elements);
+		std::vector<unsigned char> output_image_buffer(image_input.size());
 
 		//device - buffers
 		cl::Buffer dev_image_input(context, CL_MEM_READ_ONLY, image_input.size());
-		cl::Buffer dev_image_output(context, CL_MEM_READ_WRITE, image_input.size()); //should be the same as input image
+		cl::Buffer dev_image_output(context, CL_MEM_READ_WRITE, image_input.size());
+		cl::Buffer histogram_buffer(context, CL_MEM_READ_WRITE, vector_size);
+		cl::Buffer extra_cumulative_buffer(context, CL_MEM_READ_WRITE, vector_size);
+		cl::Buffer normalized_hist_buffer(context, CL_MEM_READ_WRITE, vector_size_char);
 		cl::Buffer numOfBins(context, CL_MEM_READ_ONLY, sizeof(int));
 		cl::Buffer maximumValue(context, CL_MEM_READ_ONLY, sizeof(int));
-		//4.1 Copy images to device memory
+
+		//4.1 Copy data to device memory
 		queue.enqueueWriteBuffer(dev_image_input, CL_TRUE, 0, image_input.size(), &image_input.data()[0], NULL, &profEvent);
 		queue.enqueueWriteBuffer(numOfBins, CL_TRUE, 0, sizeof(int), &bin_size, NULL, &profEvent);
-		queue.enqueueWriteBuffer(maximumValue, CL_TRUE, 0, sizeof(int), &max, NULL, &profEvent);
+		queue.enqueueWriteBuffer(maximumValue, CL_TRUE, 0, sizeof(int), &maximumPixelIntensity, NULL, &profEvent);
 
-
-		//4.2 Setup and execute the kernel (i.e. device code)
-		cl::Kernel kernel = cl::Kernel(program, "histogramVals");
-		kernel.setArg(0, dev_image_input);
-		kernel.setArg(1, numOfBins);
-		kernel.setArg(2, maximumValue);
-		kernel.setArg(3, buffer_C);
-		kernel.setArg(4, cl::Local(vector_size));
+		//4.2 Setup the kernels (i.e. device code)
+		cl::Kernel histogramKern = cl::Kernel(program, "histogramVals"); //Kernel to calculate the histogram values
+		histogramKern.setArg(0, dev_image_input);
+		histogramKern.setArg(1, numOfBins);
+		histogramKern.setArg(2, maximumValue);
+		histogramKern.setArg(3, histogram_buffer);
+		histogramKern.setArg(4, cl::Local(vector_size));
 		
-		cl::Kernel kernelB = cl::Kernel(program, "scan_bl");
-		kernelB.setArg(0, buffer_C);
-		kernelB.setArg(1, buffer_D);
+		string kernelName = "scan_bl";
+		if (!(bin_size & (bin_size - 1)) == 0) { kernelName = "scan_hs"; cerr << "Running on Hillis-Steele due to bin size\n"; }
+		cl::Kernel cumulativeKern = cl::Kernel(program, kernelName.c_str()); //Kernel to calculate cumulative histogram values
+		cumulativeKern.setArg(0, histogram_buffer);
+		cumulativeKern.setArg(1, extra_cumulative_buffer);
 
-		cl::Kernel kernelC = cl::Kernel(program, "normHistogramVals");
-		kernelC.setArg(0, buffer_C);
-		kernelC.setArg(1, maximumValue);
-		kernelC.setArg(2, buffer_E);
+		cl::Kernel normalizeKern = cl::Kernel(program, "normHistogramVals"); //Kernel to normalize histogram values
+		normalizeKern.setArg(0, histogram_buffer);
+		normalizeKern.setArg(1, maximumValue);
+		normalizeKern.setArg(2, normalized_hist_buffer);
 
-		cl::Kernel kernelD = cl::Kernel(program, "mapHistogram");
-		kernelD.setArg(0, dev_image_input);
-		kernelD.setArg(1, buffer_E);
-		kernelD.setArg(2, maximumValue);
-		kernelD.setArg(3, numOfBins);
-		kernelD.setArg(4, dev_image_output);
+		cl::Kernel mapKern = cl::Kernel(program, "mapHistogram"); //Kernel to map histogram values
+		mapKern.setArg(0, dev_image_input);
+		mapKern.setArg(1, normalized_hist_buffer);
+		mapKern.setArg(2, maximumValue);
+		mapKern.setArg(3, numOfBins);
+		mapKern.setArg(4, dev_image_output);
 
-		queue.enqueueNDRangeKernel(kernel, cl::NullRange, cl::NDRange(image_input.size()), cl::NullRange, NULL, &profEvent);
-		queue.enqueueReadBuffer(buffer_C, CL_TRUE, 0, vector_size, &C[0]);
-		cerr << "Histogram = " << C << std::endl;
-		queue.enqueueNDRangeKernel(kernelB, cl::NullRange, cl::NDRange(vector_elements), cl::NullRange, NULL, &profEvent);
-		queue.enqueueReadBuffer(buffer_C, CL_TRUE, 0, vector_size, &C[0]);
-		cerr << "Histogram = " << C << std::endl;
-		queue.enqueueReadBuffer(buffer_D, CL_TRUE, 0, vector_size, &D[0]);
-		cerr << "Cumulative = " << D << std::endl;
-		queue.enqueueNDRangeKernel(kernelC, cl::NullRange, cl::NDRange(vector_elements), cl::NullRange, NULL, &profEvent);
-		queue.enqueueReadBuffer(buffer_E, CL_TRUE, 0, vectorCharSize, &E[0]);
-		cerr << "Normalized = " << E << std::endl;
-		queue.enqueueNDRangeKernel(kernelD, cl::NullRange, cl::NDRange(image_input.size()), cl::NullRange, NULL, &profEvent);
+		//Run the kernels and read from the bufffers
+		queue.enqueueNDRangeKernel(histogramKern, cl::NullRange, cl::NDRange(image_input.size()), cl::NullRange, NULL, &profEvent);//Kernel for calculating the histogram values
+		queue.enqueueReadBuffer(histogram_buffer, CL_TRUE, 0, vector_size, &frequency_histogram[0]);
+		queue.enqueueNDRangeKernel(cumulativeKern, cl::NullRange, cl::NDRange(vector_elements), cl::NullRange, NULL, &profEvent);//Kernel for calculating the cumulative histogram values
+		queue.enqueueReadBuffer(extra_cumulative_buffer, CL_TRUE, 0, vector_size, &cumulative_histogram[0]);
+		queue.enqueueNDRangeKernel(normalizeKern, cl::NullRange, cl::NDRange(vector_elements), cl::NullRange, NULL, &profEvent);//Kernel for normalizing the histogram
+		queue.enqueueReadBuffer(normalized_hist_buffer, CL_TRUE, 0, vector_size_char, &normalized_histogram[0]);
+		queue.enqueueNDRangeKernel(mapKern, cl::NullRange, cl::NDRange(image_input.size()), cl::NullRange, NULL, &profEvent);//Kernel for mapping the histogram to the image
 		
-		vector<unsigned char> output_buffer(image_input.size());
-		//4.3 Copy the result from device to host
-		queue.enqueueReadBuffer(dev_image_output, CL_TRUE, 0, output_buffer.size(), &output_buffer.data()[0], NULL, &profEvent);
-
-		CImg<unsigned char> output_image(output_buffer.data(), image_input.width(), image_input.height(), image_input.depth(), image_input.spectrum());
+		//4.3 Copy the resulting image from device to host
+		queue.enqueueReadBuffer(dev_image_output, CL_TRUE, 0, output_image_buffer.size(), &output_image_buffer.data()[0], NULL, &profEvent);
+		//Create output image from data vector
+		CImg<unsigned char> output_image(output_image_buffer.data(), image_input.width(), image_input.height(), image_input.depth(), image_input.spectrum());
+		//Display output image
 		CImgDisplay disp_output(output_image, "output");
 		
+		//Display the values for the histograms to the console
+		cerr << "Histogram = " << frequency_histogram << std::endl;
+		cerr << "Cumulative = " << cumulative_histogram << std::endl;
+		cerr << "Normalized = " << normalized_histogram << std::endl << std::endl;
+
+		//Output kernell time
 		std::cout << "\nKernel execution time [ns]:" <<
 			profEvent.getProfilingInfo<CL_PROFILING_COMMAND_END>() -
 			profEvent.getProfilingInfo<CL_PROFILING_COMMAND_START>() << std::endl;
 		std::cout << GetFullProfilingInfo(profEvent, ProfilingResolution::PROF_US)
 			<< std::endl;
 
+		//Tells the application to wait until both images are closed
 		while (!disp_input.is_closed() && !disp_output.is_closed()
 			&& !disp_input.is_keyESC() && !disp_output.is_keyESC()) {
 			disp_input.wait(1);

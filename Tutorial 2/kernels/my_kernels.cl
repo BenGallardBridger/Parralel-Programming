@@ -35,12 +35,12 @@ kernel void scan_hs(global uint* A, global uint* B) {
 		C = A; A = B; B = C; //swap A & B between steps
 	}
 }
-//blelloch
+
+//Blelloch style scan with extra buffer to allow for edits to make inclusive
 kernel void scan_bl(global uint* A, global uint* localBuff) {
 	int id = get_global_id(0);
 	int N = get_global_size(0);
 	int t;
-	
 	
 	localBuff[id] = A[id];
 	barrier(CLK_GLOBAL_MEM_FENCE);
@@ -74,8 +74,7 @@ kernel void scan_bl(global uint* A, global uint* localBuff) {
 	}
 
 }
-
-
+//Basic Naive implementation of cumulative histogram scan
 kernel void cumHistogramVals(global const uint* A, global uint* B) {
 	int id = get_global_id(0);
 	int size = get_global_size(0);
@@ -85,21 +84,14 @@ kernel void cumHistogramVals(global const uint* A, global uint* B) {
 	}
 	B[id] = temp;
 }
-
+//Normalize histogram values
 kernel void normHistogramVals(global const uint* A, global const int* maximum, global uchar* B) {
 	int id = get_global_id(0);
 	int size = get_global_size(0);
 	int max = A[size-1];
 	int temp = (A[id] / (float)max) * maximum[0];
-	if (temp > maximum[0]) {
-
-		B[id] = (uchar)(maximum[0]);
-	}
-	else {
-		B[id] = (uchar)temp;
-	}
 }
-
+//Map histogram values
 kernel void mapHistogram(global const uchar* A, global const uchar* B, global const int* maximum, global const int* binSize, global uchar* C) {
 	int id = get_global_id(0);
 	int binNum = (A[id] / (float)maximum[0]) * (binSize[0]-1);
