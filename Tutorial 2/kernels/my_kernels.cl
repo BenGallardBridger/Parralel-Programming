@@ -13,8 +13,11 @@ kernel void histogramVals(global const uchar* A, global const int* binSize, glob
 	barrier(CLK_LOCAL_MEM_FENCE);
 	atomic_inc(&localH[bin_num]);
 	barrier(CLK_LOCAL_MEM_FENCE);
-	if (id < binSize) {
-		atomic_add(&B[id],localH[id]);
+	if (id < binSize[0]) {
+		if (localH[id] >0)
+		{
+			atomic_add(&B[id], localH[id]);
+		}
 	}
 }
 
@@ -90,6 +93,7 @@ kernel void normHistogramVals(global const uint* A, global const int* maximum, g
 	int size = get_global_size(0);
 	int max = A[size-1];
 	int temp = (A[id] / (float)max) * maximum[0];
+	B[id] = temp;
 }
 //Map histogram values
 kernel void mapHistogram(global const uchar* A, global const uchar* B, global const int* maximum, global const int* binSize, global uchar* C) {

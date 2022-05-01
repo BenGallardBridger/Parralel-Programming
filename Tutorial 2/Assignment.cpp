@@ -19,10 +19,10 @@ void print_help() {
 
 int main(int argc, char** argv) {
 	//Part 1 - handle command line options such as device selection, verbosity, etc.
-	int platform_id = 1;
+	int platform_id = 0;
 	int device_id = 0;
 	string image_filename = "test.pgm";
-	int bin_size = 60;
+	int bin_size = 64;
 	for (int i = 1; i < argc; i++) {
 		if ((strcmp(argv[i], "-p") == 0) && (i < (argc - 1))) { platform_id = atoi(argv[++i]); }
 		else if ((strcmp(argv[i], "-d") == 0) && (i < (argc - 1))) { device_id = atoi(argv[++i]); }
@@ -98,6 +98,8 @@ int main(int argc, char** argv) {
 		queue.enqueueWriteBuffer(dev_image_input, CL_TRUE, 0, image_input.size(), &image_input.data()[0], NULL, &profEvent);
 		queue.enqueueWriteBuffer(numOfBins, CL_TRUE, 0, sizeof(int), &bin_size, NULL, &profEvent);
 		queue.enqueueWriteBuffer(maximumValue, CL_TRUE, 0, sizeof(int), &maximumPixelIntensity, NULL, &profEvent);
+		queue.enqueueFillBuffer(histogram_buffer, 0, 0, vector_size);
+		queue.enqueueFillBuffer(extra_cumulative_buffer, 0, 0, vector_size);
 
 		//4.2 Setup the kernels (i.e. device code)
 		cl::Kernel histogramKern = cl::Kernel(program, "histogramVals"); //Kernel to calculate the histogram values
@@ -129,7 +131,7 @@ int main(int argc, char** argv) {
 		queue.enqueueNDRangeKernel(histogramKern, cl::NullRange, cl::NDRange(image_input.size()), cl::NullRange, NULL, &profEvent);//Kernel for calculating the histogram values
 		queue.enqueueReadBuffer(histogram_buffer, CL_TRUE, 0, vector_size, &frequency_histogram[0]);
 		queue.enqueueNDRangeKernel(cumulativeKern, cl::NullRange, cl::NDRange(vector_elements), cl::NullRange, NULL, &profEvent);//Kernel for calculating the cumulative histogram values
-		queue.enqueueReadBuffer(extra_cumulative_buffer, CL_TRUE, 0, vector_size, &cumulative_histogram[0]);
+		queue.enqueueReadBuffer(histogram_buffer, CL_TRUE, 0, vector_size, &cumulative_histogram[0]);
 		queue.enqueueNDRangeKernel(normalizeKern, cl::NullRange, cl::NDRange(vector_elements), cl::NullRange, NULL, &profEvent);//Kernel for normalizing the histogram
 		queue.enqueueReadBuffer(normalized_hist_buffer, CL_TRUE, 0, vector_size_char, &normalized_histogram[0]);
 		queue.enqueueNDRangeKernel(mapKern, cl::NullRange, cl::NDRange(image_input.size()), cl::NullRange, NULL, &profEvent);//Kernel for mapping the histogram to the image
