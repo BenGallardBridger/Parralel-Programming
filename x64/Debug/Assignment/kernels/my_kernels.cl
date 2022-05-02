@@ -9,12 +9,15 @@
 //histogrammer
 kernel void histogramVals(global const uchar* A, global const int* binSize, global const int* maximum, global uint* B, local uint* localH) {
 	int id = get_global_id(0);
-	int bin_num = (A[id] / (float)maximum[0]) * binSize[0]-1;
+	int lid = get_local_id(0);
+	int bin_num = (A[id] / (float)maximum[0]) * (binSize[0]-1);
 	barrier(CLK_LOCAL_MEM_FENCE);
 	atomic_inc(&localH[bin_num]);
 	barrier(CLK_LOCAL_MEM_FENCE);
-	if (bin_num < binSize) {
-		atomic_add(&B[bin_num],localH[bin_num]);
+	if (lid < binSize[0]) {
+		if (localH[lid] >0) {
+			atomic_add(&B[lid], localH[lid]);
+		}
 	}
 }
 

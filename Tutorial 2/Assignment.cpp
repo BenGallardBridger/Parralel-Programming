@@ -22,7 +22,7 @@ int main(int argc, char** argv) {
 	int platform_id = 0;
 	int device_id = 0;
 	string image_filename = "test.pgm";
-	int bin_size = 64;
+	int bin_size = 20;
 	for (int i = 1; i < argc; i++) {
 		if ((strcmp(argv[i], "-p") == 0) && (i < (argc - 1))) { platform_id = atoi(argv[++i]); }
 		else if ((strcmp(argv[i], "-d") == 0) && (i < (argc - 1))) { device_id = atoi(argv[++i]); }
@@ -73,9 +73,11 @@ int main(int argc, char** argv) {
 		//Part 4 - device operations
 		size_t vector_elements = bin_size;//number of elements
 		size_t vector_size = bin_size * sizeof(unsigned int);//size in bytes
-		size_t vector_size_char = bin_size * sizeof(unsigned char);
+		size_t vector_size_char = bin_size * sizeof(unsigned char);//size in bytes
+
 		//Get the maximum value of a pixel from the image
 		int maximumPixelIntensity = image_input.max();
+
 		//Event to track time for all operations to take place
 		cl::Event profEvent;
 
@@ -85,8 +87,12 @@ int main(int argc, char** argv) {
 		std::vector<unsigned char> normalized_histogram(vector_elements);
 		std::vector<unsigned char> output_image_buffer(image_input.size());
 
+		//Padding Calculation
+		int numberToAdd = bin_size - (image_input.size() % bin_size); // Calculates the number of elements to pad by
+		if (numberToAdd == bin_size) { numberToAdd = 0; } // Sets number to add to 0, if it equals the number of bins
+
 		//device - buffers
-		cl::Buffer dev_image_input(context, CL_MEM_READ_ONLY, image_input.size());
+		cl::Buffer dev_image_input(context, CL_MEM_READ_ONLY, image_input.size()+(sizeof(unsigned char)*numberToAdd));//Padding 
 		cl::Buffer dev_image_output(context, CL_MEM_READ_WRITE, image_input.size());
 		cl::Buffer histogram_buffer(context, CL_MEM_READ_WRITE, vector_size);
 		cl::Buffer extra_cumulative_buffer(context, CL_MEM_READ_WRITE, vector_size);
@@ -128,8 +134,15 @@ int main(int argc, char** argv) {
 		mapKern.setArg(4, dev_image_output);
 
 		//Run the kernels and read from the bufffers
-		queue.enqueueNDRangeKernel(histogramKern, cl::NullRange, cl::NDRange(image_input.size()), cl::NullRange, NULL, &profEvent);//Kernel for calculating the histogram values
+		queue.enqueueNDRangeKernel(histogramKern, cl::NullRange, cl::NDRange(image_input.size()+numberToAdd), cl::NDRange(vector_elements), NULL, &profEvent);//Kernel for calculating the histogram values
 		queue.enqueueReadBuffer(histogram_buffer, CL_TRUE, 0, vector_size, &frequency_histogram[0]);
+
+		//Removes the extra padded values from the intensity histogram, rewrites corrected answer back to the intensity histogram buffer
+		if (numberToAdd > 0) {
+			frequency_histogram[0] -= numberToAdd;
+			queue.enqueueWriteBuffer(histogram_buffer, CL_TRUE, 0, vector_size, &frequency_histogram[0], NULL, &profEvent);
+		}
+
 		queue.enqueueNDRangeKernel(cumulativeKern, cl::NullRange, cl::NDRange(vector_elements), cl::NullRange, NULL, &profEvent);//Kernel for calculating the cumulative histogram values
 		queue.enqueueReadBuffer(histogram_buffer, CL_TRUE, 0, vector_size, &cumulative_histogram[0]);
 		queue.enqueueNDRangeKernel(normalizeKern, cl::NullRange, cl::NDRange(vector_elements), cl::NullRange, NULL, &profEvent);//Kernel for normalizing the histogram
