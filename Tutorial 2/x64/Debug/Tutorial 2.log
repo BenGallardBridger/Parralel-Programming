@@ -1,7 +1,7 @@
 ﻿D:\App Installations\Microsoft Visual Studio\2019\Community\MSBuild\Microsoft\VC\v160\Microsoft.CppBuild.targets(513,5): warning MSB8028: The intermediate directory (x64\Debug\) contains files shared from another project (Tutorial 2.vcxproj).  This can lead to incorrect clean and rebuild behavior.
   Assignment.cpp
   cl_version.h: CL_TARGET_OPENCL_VERSION is not defined. Defaulting to 220 (OpenCL 2.2)
-  Tutorial 2.vcxproj -> E:\Parralel-Programming\x64\Debug\Assignment\Assignment.exe
+  Tutorial 2.vcxproj -> D:\Documents\GitHub\Parralel-Programming\x64\Debug\Assignment\Assignment.exe
   ..\images\big_building.ppm
   ..\images\flower_foveon.ppm
   ..\images\spider_web.pgm

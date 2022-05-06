@@ -1,23 +1,17 @@
-//converts values into histogram
-//kernel void histogramVals(global const uchar* A, global const int* binSize, global const int* maximum, global uint* B) {
-//	int id = get_global_id(0);
-//	int bin_num = (A[id]/(float)maximum[0])*(binSize[0]-1);
-//
-//	atomic_inc(&B[bin_num]);
-//}
-
-//histogrammer
+//Converts Values into Histogram
 kernel void histogramVals(global const uchar* A, global const int* binSize, global const int* maximum, global uint* B, local uint* localH) {
 	int id = get_global_id(0);
 	int lid = get_local_id(0);
-	int bin_num = (A[id] / (float)maximum[0]) * (binSize[0]-1);
+	int bin_num = ((int)A[id] / (float)maximum[0]) * (binSize[0]-1);
+	//Reset Values in local memory
+	localH[lid] = 0;
 	barrier(CLK_LOCAL_MEM_FENCE);
+	//Increment local histogram bins
 	atomic_inc(&localH[bin_num]);
 	barrier(CLK_LOCAL_MEM_FENCE);
+	//Merge Local hist to global hist
 	if (lid < binSize[0]) {
-		if (localH[lid] >0) {
-			atomic_add(&B[lid], localH[lid]);
-		}
+		atomic_add(&B[lid], localH[lid]);
 	}
 }
 
@@ -28,7 +22,7 @@ kernel void scan_hs(global uint* A, global uint* B) {
 	int N = get_global_size(0);
 	global uint* C;
 
-	for (int stride = 1; stride < N; stride *= 2) {
+	for (int stride = 1; stride <= N; stride *= 2) {
 		B[id] = A[id];
 		if (id >= stride)
 			B[id] += A[id - stride];
@@ -46,6 +40,7 @@ kernel void scan_bl(global uint* A, global uint* localBuff) {
 	int t;
 	
 	localBuff[id] = A[id];
+
 	barrier(CLK_GLOBAL_MEM_FENCE);
 
 	// Up-sweep
@@ -69,6 +64,8 @@ kernel void scan_bl(global uint* A, global uint* localBuff) {
 	}
 
 	barrier(CLK_GLOBAL_MEM_FENCE);
+	//Include the last item 
+	//Makes inclusive scan
 	if (id > 0 && id < (N)) {
 		A[id - 1] = localBuff[id];
 	}
@@ -78,7 +75,7 @@ kernel void scan_bl(global uint* A, global uint* localBuff) {
 
 }
 //Basic Naive implementation of cumulative histogram scan
-kernel void cumHistogramVals(global const uint* A, global uint* B) {
+kernel void simpleScan(global const uint* A, global uint* B) {
 	int id = get_global_id(0);
 	int size = get_global_size(0);
 	int temp = 0;
